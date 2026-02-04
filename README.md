@@ -113,6 +113,63 @@ A simple, elegant one-page web application for managing milk deliveries and trac
    - No server configuration needed
    - Access via browser using the hosted URL
 
+## Firebase Setup (Cloud Storage)
+
+Follow these steps to configure Firebase for centralized data storage and authentication:
+
+1. Create a Firebase project at https://console.firebase.google.com/.
+2. Go to Project Settings → General → Your apps → Add web app and register your app.
+3. Copy the Firebase SDK config (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId) and paste it into `index.html` in the `firebaseConfig` object.
+
+Example config block in `index.html`:
+
+```js
+const firebaseConfig = {
+  apiKey: "<YOUR_API_KEY>",
+  authDomain: "<YOUR_PROJECT>.firebaseapp.com",
+  projectId: "<YOUR_PROJECT>",
+  storageBucket: "<YOUR_PROJECT>.appspot.com",
+  messagingSenderId: "<SENDER_ID>",
+  appId: "<APP_ID>",
+}
+```
+
+4. In Firebase Console → Firestore Database, create a database in production or test mode (test mode allows open reads/writes for 30 days).
+5. In Firebase Console → Authentication → Sign-in method, enable Email/Password sign-in (used for vendor login).
+
+Recommended Firestore rules (start with strict rules in production). Put these in Firestore → Rules:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Customers collection: vendor-only writes, public reads for customers
+    match /customers/{customerId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && request.auth.token.email == "admin@yourdomain.com";
+    }
+
+    // Milk entries: vendor writes, customers can read their own entries
+    match /milkEntries/{entryId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && request.auth.token.email == "admin@yourdomain.com";
+    }
+  }
+}
+```
+
+Notes:
+- Replace `admin@yourdomain.com` with your vendor account email from Firebase Auth.
+- For development you can allow broader access, but tighten rules before production.
+
+## Creating the Vendor Account
+
+1. In Firebase Console → Authentication → Users → Add user.
+2. Create a user with the vendor email (e.g., `admin@yourdomain.com`) and a strong password.
+3. Use that email/password in the app's Vendor login fields to sign in.
+
+After completing these steps, reload `index.html`; the app will use Firestore for customers and entries and Firebase Auth for vendor login.
+
 ## Troubleshooting
 
 ### Data Not Saving?
