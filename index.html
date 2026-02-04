@@ -18,339 +18,380 @@
             --success: #10b981;
             --danger: #ef4444;
             --bg-light: #f8fafc;
-            --bg-white: #ffffff;
-            --text-dark: #1e293b;
-            --text-gray: #64748b;
-            --border: #e2e8f0;
-            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
-            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-        }
+            <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+            <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+            <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+            <script>
+                // Firebase configuration - Replace the placeholders with your project config
+                const firebaseConfig = {
+                    apiKey: "YOUR_API_KEY",
+                    authDomain: "YOUR_AUTH_DOMAIN",
+                    projectId: "YOUR_PROJECT_ID",
+                    // Optional: storageBucket, messagingSenderId, appId
+                };
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: var(--text-dark);
-        }
+                // Initialize Firebase
+                firebase.initializeApp(firebaseConfig);
+                const db = firebase.firestore();
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+                // Data Storage (cloud-first). Local arrays are used as UI cache.
+                const VENDOR_CREDENTIALS = { name: 'Admin', mobile: '1234567890' };
+                let customers = [];
+                let milkEntries = [];
+                let currentUser = null;
 
-        /* Login Page Styles */
-        .login-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
+                // Initialize
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.getElementById('entryDate').valueAsDate = new Date();
+                    populateMonthFilters();
+                    fetchDataFromCloud();
+                });
 
-        .login-card {
-            background: var(--bg-white);
-            border-radius: 16px;
-            padding: 40px;
-            box-shadow: var(--shadow-lg);
-            width: 100%;
-            max-width: 400px;
-            animation: fadeIn 0.5s ease;
-        }
+                async function fetchDataFromCloud() {
+                    try {
+                        const custSnap = await db.collection('customers').orderBy('createdAt', 'asc').get();
+                        customers = custSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+                        const entrySnap = await db.collection('milkEntries').orderBy('date', 'desc').get();
+                        milkEntries = entrySnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        .login-header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
+                        updateVendorDashboard();
+                        populateCustomerDropdown();
+                    } catch (err) {
+                        console.error('Error fetching data from cloud:', err);
+                        showMessage('loginMessage', 'Failed to load cloud data. Check Firebase config.', 'error');
+                    }
+                }
 
-        .login-header h1 {
-            font-size: 28px;
-            color: var(--primary);
-            margin-bottom: 8px;
-        }
+                // Login Form
+                document.getElementById('loginForm').addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const userType = document.getElementById('userType').value;
+                    const name = document.getElementById('loginName').value.trim();
+                    const mobile = document.getElementById('loginMobile').value.trim();
 
-        .login-header p {
-            color: var(--text-gray);
-            font-size: 14px;
-        }
+                    if (userType === 'vendor') {
+                        if (name === VENDOR_CREDENTIALS.name && mobile === VENDOR_CREDENTIALS.mobile) {
+                            currentUser = { type: 'vendor', name, mobile };
+                            showDashboard('vendor');
+                        } else {
+                            showMessage('loginMessage', 'Invalid vendor credentials', 'error');
+                        }
+                    } else if (userType === 'customer') {
+                        const customer = customers.find(c => c.name === name && c.mobile === mobile);
+                        if (customer) {
+                            currentUser = { type: 'customer', ...customer };
+                            showDashboard('customer');
+                        } else {
+                            showMessage('loginMessage', 'Customer not found. Please contact vendor.', 'error');
+                        }
+                    }
+                });
 
-        .form-group {
-            margin-bottom: 20px;
-        }
+                // Add Customer Form (writes to Firestore)
+                document.getElementById('addCustomerForm').addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    const name = document.getElementById('addCustomerName').value.trim();
+                    const mobile = document.getElementById('addCustomerMobile').value.trim();
+                    const rate = parseFloat(document.getElementById('addMilkRate').value);
 
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: var(--text-dark);
-            font-weight: 500;
-            font-size: 14px;
-        }
+                    if (customers.find(c => c.mobile === mobile)) {
+                        showMessage('customerMessage', 'Customer with this mobile number already exists', 'error');
+                        return;
+                    }
 
-        input, select {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid var(--border);
-            border-radius: 8px;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
+                    try {
+                        const docRef = await db.collection('customers').add({ name, mobile, rate, createdAt: new Date().toISOString() });
+                        const customer = { id: docRef.id, name, mobile, rate, createdAt: new Date().toISOString() };
+                        customers.push(customer);
 
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        }
+                        showMessage('customerMessage', 'Customer added successfully!', 'success');
+                        this.reset();
+                        updateVendorDashboard();
+                        populateCustomerDropdown();
 
-        .btn {
-            width: 100%;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
+                        setTimeout(() => {
+                            closeModal('addCustomerModal');
+                        }, 1500);
+                    } catch (err) {
+                        console.error('Add customer failed:', err);
+                        showMessage('customerMessage', 'Failed to add customer to cloud', 'error');
+                    }
+                });
 
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
+                // Add Entry Form (writes to Firestore)
+                document.getElementById('addEntryForm').addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    const customerId = document.getElementById('entryCustomer').value; // string id from Firestore
+                    const date = document.getElementById('entryDate').value;
+                    const session = document.getElementById('entrySession').value;
+                    const quantity = parseFloat(document.getElementById('entryQuantity').value);
 
-        .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-lg);
-        }
+                    // Check for duplicate entry
+                    const duplicate = milkEntries.find(en =>
+                        en.customerId === customerId &&
+                        en.date === date &&
+                        en.session === session
+                    );
 
-        .btn-secondary {
-            background: var(--secondary);
-            color: white;
-            margin-top: 10px;
-        }
+                    if (duplicate) {
+                        showMessage('entryMessage', 'Entry already exists for this date and session', 'error');
+                        return;
+                    }
 
-        .btn-secondary:hover {
-            background: #d97706;
-        }
+                    try {
+                        const docRef = await db.collection('milkEntries').add({ customerId, date, session, quantity, createdAt: new Date().toISOString() });
+                        const entry = { id: docRef.id, customerId, date, session, quantity, createdAt: new Date().toISOString() };
+                        milkEntries.push(entry);
 
-        .btn-success {
-            background: var(--success);
-            color: white;
-        }
+                        showMessage('entryMessage', 'Entry added successfully!', 'success');
+                        this.reset();
+                        document.getElementById('entryDate').valueAsDate = new Date();
+                        updateVendorDashboard();
 
-        .btn-danger {
-            background: var(--danger);
-            color: white;
-        }
+                        setTimeout(() => {
+                            closeModal('addEntryModal');
+                        }, 1500);
+                    } catch (err) {
+                        console.error('Add entry failed:', err);
+                        showMessage('entryMessage', 'Failed to add entry to cloud', 'error');
+                    }
+                });
 
-        /* Dashboard Styles */
-        .dashboard {
-            display: none;
-            animation: fadeIn 0.5s ease;
-        }
+                function showDashboard(type) {
+                    document.getElementById('loginPage').style.display = 'none';
+                    if (type === 'vendor') {
+                        document.getElementById('vendorDashboard').classList.add('active');
+                        document.getElementById('vendorName').textContent = currentUser.name;
+                        updateVendorDashboard();
+                        populateCustomerDropdown();
+                    } else {
+                        document.getElementById('customerDashboard').classList.add('active');
+                        document.getElementById('customerName').textContent = currentUser.name;
+                        updateCustomerDashboard();
+                    }
+                }
 
-        .dashboard.active {
-            display: block;
-        }
+                function updateVendorDashboard() {
+                    // Update stats
+                    document.getElementById('totalCustomers').textContent = customers.length;
 
-        .dashboard-header {
-            background: var(--bg-white);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: var(--shadow);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
+                    const today = new Date().toISOString().split('T')[0];
+                    const todayEntries = milkEntries.filter(e => e.date === today);
+                    const morningTotal = todayEntries.filter(e => e.session === 'morning')
+                        .reduce((sum, e) => sum + e.quantity, 0);
+                    const eveningTotal = todayEntries.filter(e => e.session === 'evening')
+                        .reduce((sum, e) => sum + e.quantity, 0);
 
-        .dashboard-header h1 {
-            font-size: 24px;
-            color: var(--text-dark);
-        }
+                    document.getElementById('todayMorning').textContent = morningTotal.toFixed(2);
+                    document.getElementById('todayEvening').textContent = eveningTotal.toFixed(2);
 
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
+                    // Update entries table
+                    displayVendorEntries();
+                }
 
-        .card {
-            background: var(--bg-white);
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: var(--shadow);
-        }
+                function displayVendorEntries(filterMonth = '') {
+                    const tbody = document.getElementById('vendorEntriesBody');
+                    let entries = [...milkEntries].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 2px solid var(--border);
-        }
+                    if (filterMonth) {
+                        entries = entries.filter(e => e.date.startsWith(filterMonth));
+                    }
 
-        .card-header h2 {
-            font-size: 20px;
-            color: var(--text-dark);
-        }
+                    entries = entries.slice(0, 50); // Show latest 50 entries
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 24px;
-        }
+                    tbody.innerHTML = entries.map(entry => {
+                        const customer = customers.find(c => c.id === entry.customerId);
+                        return `
+                            <tr>
+                                <td>${formatDate(entry.date)}</td>
+                                <td>${customer ? customer.name : 'Unknown'}</td>
+                                <td><span class="badge ${entry.session}">${entry.session}</span></td>
+                                <td>${entry.quantity} L</td>
+                                <td>
+                                    <button class="btn-small btn-danger" onclick="deleteEntry('${entry.id}')">Delete</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
 
-        .stat-card {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-        }
+                function updateCustomerDashboard() {
+                    const currentMonth = new Date().toISOString().substring(0, 7);
+                    filterCustomerEntries(currentMonth);
+                }
 
-        .stat-card.warning {
-            background: linear-gradient(135deg, var(--secondary) 0%, #d97706 100%);
-        }
+                function filterCustomerEntries(month) {
+                    const selectedMonth = month || document.getElementById('customerMonthFilter').value || new Date().toISOString().substring(0, 7);
 
-        .stat-card.success {
-            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
-        }
+                    const customerEntries = milkEntries.filter(e =>
+                        e.customerId === currentUser.id &&
+                        e.date.startsWith(selectedMonth)
+                    );
 
-        .stat-card h3 {
-            font-size: 14px;
-            opacity: 0.9;
-            margin-bottom: 8px;
-        }
+                    const morningTotal = customerEntries.filter(e => e.session === 'morning')
+                        .reduce((sum, e) => sum + e.quantity, 0);
+                    const eveningTotal = customerEntries.filter(e => e.session === 'evening')
+                        .reduce((sum, e) => sum + e.quantity, 0);
+                    const monthTotal = morningTotal + eveningTotal;
+                    const totalAmount = monthTotal * currentUser.rate;
 
-        .stat-card .value {
-            font-size: 32px;
-            font-weight: bold;
-        }
+                    document.getElementById('customerMonthTotal').textContent = monthTotal.toFixed(2);
+                    document.getElementById('customerMorningTotal').textContent = morningTotal.toFixed(2);
+                    document.getElementById('customerEveningTotal').textContent = eveningTotal.toFixed(2);
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 16px;
-        }
+                    // Display monthly summary
+                    const summaryDiv = document.getElementById('monthlySummary');
+                    summaryDiv.innerHTML = `
+                        <div style="padding: 20px; background: var(--bg-light); border-radius: 8px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                                <div>
+                                    <p style="color: var(--text-gray); font-size: 14px;">Total Milk</p>
+                                    <p style="font-size: 24px; font-weight: bold; color: var(--primary);">${monthTotal.toFixed(2)} L</p>
+                                </div>
+                                <div>
+                                    <p style="color: var(--text-gray); font-size: 14px;">Rate per Liter</p>
+                                    <p style="font-size: 24px; font-weight: bold; color: var(--secondary);">₹${currentUser.rate.toFixed(2)}</p>
+                                </div>
+                                <div>
+                                    <p style="color: var(--text-gray); font-size: 14px;">Total Amount</p>
+                                    <p style="font-size: 24px; font-weight: bold; color: var(--success);">₹${totalAmount.toFixed(2)}</p>
+                                </div>
+                            </div>
+                            <div style="border-top: 2px solid var(--border); padding-top: 16px;">
+                                <p style="color: var(--text-gray); font-size: 14px; margin-bottom: 8px;">Breakdown:</p>
+                                <p style="font-size: 14px;">Morning: ${morningTotal.toFixed(2)} L × ₹${currentUser.rate.toFixed(2)} = ₹${(morningTotal * currentUser.rate).toFixed(2)}</p>
+                                <p style="font-size: 14px;">Evening: ${eveningTotal.toFixed(2)} L × ₹${currentUser.rate.toFixed(2)} = ₹${(eveningTotal * currentUser.rate).toFixed(2)}</p>
+                            </div>
+                        </div>
+                    `;
 
-        thead {
-            background: var(--bg-light);
-        }
+                    // Display entries
+                    const tbody = document.getElementById('customerEntriesBody');
+                    const sortedEntries = customerEntries.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-        th, td {
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
+                    tbody.innerHTML = sortedEntries.map(entry => `
+                        <tr>
+                            <td>${formatDate(entry.date)}</td>
+                            <td><span class="badge ${entry.session}">${entry.session}</span></td>
+                            <td>${entry.quantity} L</td>
+                        </tr>
+                    `).join('');
+                }
 
-        th {
-            font-weight: 600;
-            color: var(--text-dark);
-            font-size: 14px;
-        }
+                async function deleteEntry(id) {
+                    if (confirm('Are you sure you want to delete this entry?')) {
+                        try {
+                            await db.collection('milkEntries').doc(id).delete();
+                            milkEntries = milkEntries.filter(e => e.id !== id);
+                            updateVendorDashboard();
+                        } catch (err) {
+                            console.error('Delete failed:', err);
+                            showMessage('loginMessage', 'Failed to delete entry from cloud', 'error');
+                        }
+                    }
+                }
 
-        td {
-            color: var(--text-gray);
-            font-size: 14px;
-        }
+                function showAllCustomers() {
+                    const tbody = document.getElementById('vendorEntriesBody');
+                    const thead = document.querySelector('#vendorEntriesTable thead tr');
+            
+                    // Update table header
+                    thead.innerHTML = `
+                        <th>Customer Name</th>
+                        <th>Mobile</th>
+                        <th>Total Liters</th>
+                        <th>Rate/L</th>
+                        <th>Action</th>
+                    `;
+            
+                    // Display all customers
+                    tbody.innerHTML = customers.map(customer => {
+                        const customerEntries = milkEntries.filter(e => e.customerId === customer.id);
+                        const totalLiters = customerEntries.reduce((sum, e) => sum + e.quantity, 0);
+                        return `
+                            <tr>
+                                <td><strong>${customer.name}</strong></td>
+                                <td>${customer.mobile}</td>
+                                <td>${totalLiters.toFixed(2)} L</td>
+                                <td>₹${customer.rate.toFixed(2)}/L</td>
+                                <td><button class="btn-small btn-primary" onclick="updateVendorDashboard()">Back</button></td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
 
-        tbody tr:hover {
-            background: var(--bg-light);
-        }
+                function populateCustomerDropdown() {
+                    const select = document.getElementById('entryCustomer');
+                    select.innerHTML = '<option value="">Select Customer</option>' + 
+                        customers.map(c => `<option value="${c.id}">${c.name} - ${c.mobile}</option>`).join('');
+                }
 
-        .form-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 20px;
-        }
+                function populateMonthFilters() {
+                    const months = [];
+                    const now = new Date();
+                    for (let i = 0; i < 12; i++) {
+                        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                        const monthStr = date.toISOString().substring(0, 7);
+                        const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                        months.push({ value: monthStr, label: monthName });
+                    }
+            
+                    const vendorFilter = document.getElementById('vendorMonthFilter');
+                    const customerFilter = document.getElementById('customerMonthFilter');
+            
+                    const options = months.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    vendorFilter.innerHTML = '<option value="">All Months</option>' + options;
+                    customerFilter.innerHTML = '<option value="">Select Month</option>' + options;
+            
+                    // Set current month as default for customer
+                    customerFilter.value = now.toISOString().substring(0, 7);
+                }
 
-        .btn-small {
-            padding: 6px 12px;
-            font-size: 13px;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-        }
+                function filterVendorEntries() {
+                    const month = document.getElementById('vendorMonthFilter').value;
+                    displayVendorEntries(month);
+                }
 
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
+                function openModal(modalId) {
+                    document.getElementById(modalId).classList.add('active');
+                }
 
-        .modal.active {
-            display: flex;
-        }
+                function closeModal(modalId) {
+                    document.getElementById(modalId).classList.remove('active');
+                    // Clear messages
+                    const messageElements = document.querySelectorAll(`#${modalId} .message`);
+                    messageElements.forEach(el => el.remove());
+                }
 
-        .modal-content {
-            background: var(--bg-white);
-            border-radius: 16px;
-            padding: 32px;
-            max-width: 500px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-            animation: slideUp 0.3s ease;
-        }
+                function logout() {
+                    currentUser = null;
+                    document.getElementById('vendorDashboard').classList.remove('active');
+                    document.getElementById('customerDashboard').classList.remove('active');
+                    document.getElementById('loginPage').style.display = 'flex';
+                    document.getElementById('loginForm').reset();
+                }
 
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(50px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+                function showMessage(elementId, message, type) {
+                    const messageDiv = document.getElementById(elementId);
+                    messageDiv.innerHTML = `<div class="message ${type}">${message}</div>`;
+                    setTimeout(() => {
+                        messageDiv.innerHTML = '';
+                    }, 3000);
+                }
 
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
+                function formatDate(dateStr) {
+                    const date = new Date(dateStr + 'T00:00:00');
+                    return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                }
 
-        .modal-header h2 {
-            font-size: 22px;
-        }
-
-        .close-modal {
-            background: none;
-            border: none;
-            font-size: 28px;
-            cursor: pointer;
-            color: var(--text-gray);
-            line-height: 1;
-        }
-
-        .close-modal:hover {
+                // Close modals when clicking outside
+                window.onclick = function(event) {
+                    if (event.target.classList.contains('modal')) {
+                        event.target.classList.remove('active');
+                    }
+                }
+            </script>
             color: var(--text-dark);
         }
 
